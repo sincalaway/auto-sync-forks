@@ -2,7 +2,11 @@ name: Sync Forks
 
 on:
   schedule:
-    - cron: '10 6 * * *'
+    # 中国时间每天凌晨 0 点
+    # GitHub Actions 使用 UTC
+    # 中国 UTC+8，所以写前一天 16:00
+    - cron: '0 16 * * *'
+
   workflow_dispatch:
 
 jobs:
@@ -10,48 +14,103 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Sync all forks
+      - name: Sync all fork repositories
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
 
-          USER=$(curl -s -H "Authorization: token $GH_TOKEN" \
+        run: |
+          set +e
+
+          sudo apt-get update
+          sudo apt-get install -y jq git
+
+          USER=$(curl -s \
+            -H "Authorization: token $GH_TOKEN" \
             https://api.github.com/user | jq -r .login)
 
-          echo "Current user: $USER"
+          echo "====================================="
+          echo "Current User: $USER"
+          echo "====================================="
 
-          REPOS=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/users/$USER/repos?per_page=100" \
-            | jq -r '.[] | select(.fork == true) | .name')
+          PAGE=1
 
-          for REPO in $REPOS; do
-            echo "========================="
-            echo "Syncing $REPO"
-            echo "========================="
+          while true; do
 
-            git clone https://x-access-token:$GH_TOKEN@github.com/$USER/$REPO.git
+            echo ""
+            echo "Fetching page $PAGE ..."
+            echo ""
 
-            cd $REPO
+            REPOS=$(curl -s \
+              -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/users/$USER/repos?per_page=100&page=$PAGE" \
+              | jq -r '.[] | select(.fork == true) | .name')
 
-            UPSTREAM=$(curl -s -H "Authorization: token $GH_TOKEN" \
-              https://api.github.com/repos/$USER/$REPO \
-              | jq -r '.parent.clone_url')
+            # 如果这一页为空
+            if [ -z "$REPOS" ]; then
+              echo "No more repositories."
+              break
+            fi
 
-            git remote add upstream $UPSTREAM
+            for REPO in $REPOS; do
 
-            git fetch upstream
+              echo ""
+              echo "====================================="
+              echo "Syncing repository: $REPO"
+              echo "====================================="
 
-            DEFAULT_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
+              # 每个仓库独立运行
+              (
+                rm -rf "$REPO"
 
-            git checkout $DEFAULT_BRANCH
+                git clone \
+                  "https://x-access-token:$GH_TOKEN@github.com/$USER/$REPO.git"
 
-            git merge upstream/$DEFAULT_BRANCH --allow-unrelated-histories || true
+                cd "$REPO" || exit
 
-            git push origin $DEFAULT_BRANCH || true
+                # 获取 upstream
+                UPSTREAM=$(curl -s \
+                  -H "Authorization: token $GH_TOKEN" \
+                  "https://api.github.com/repos/$USER/$REPO" \
+                  | jq -r '.parent.clone_url')
 
-            cd ..
+                if [ "$UPSTREAM" = "null" ]; then
+                  echo "No upstream found, skipping..."
+                  exit
+                fi
 
-            rm -rf $REPO
+                git remote add upstream "$UPSTREAM"
+
+                git fetch upstream
+
+                # 获取默认分支
+                DEFAULT_BRANCH=$(git remote show origin \
+                  | sed -n '/HEAD branch/s/.*: //p')
+
+                echo "Default branch: $DEFAULT_BRANCH"
+
+                git checkout "$DEFAULT_BRANCH"
+
+                # 使用 rebase（更干净）
+                git pull --rebase upstream "$DEFAULT_BRANCH"
+
+                # 推送
+                git push origin "$DEFAULT_BRANCH"
+
+                echo "Repository synced successfully."
+
+              ) || echo "Failed to sync $REPO, skipped."
+
+              echo ""
+              echo "Finished: $REPO"
+              echo ""
+
+            done
+
+            PAGE=$((PAGE + 1))
+
           done
+
+          echo ""
+          echo "====================================="
+          echo "All synchronization tasks completed."
+          echo "====================================="
