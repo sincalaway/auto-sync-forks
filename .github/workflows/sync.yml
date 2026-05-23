@@ -2,11 +2,8 @@ name: Sync Forks
 
 on:
   schedule:
-    # 中国时间每天凌晨 0 点
-    # GitHub Actions 使用 UTC
-    # 中国 UTC+8，所以写前一天 16:00
+    # 中国时间每天凌晨 0 点 (UTC 16:00)
     - cron: '0 16 * * *'
-
   workflow_dispatch:
 
 permissions:
@@ -19,14 +16,26 @@ jobs:
     steps:
       - name: Sync all fork repositories
         env:
+          # 必须使用具有 'repo' 权限的 Personal Access Token (PAT)
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
+          
         run: |
           set +e
 
+          # 1. 安装依赖并清理空间
           sudo apt-get update
           sudo apt-get install -y jq git
 
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo docker system prune -af || true
+
+          # 2. 配置 Git 身份信息 (避免 rebase 时报错)
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 3. 获取当前 Token 绑定的用户名
           USER=$(curl -s \
             -H "Authorization: token $GH_TOKEN" \
             https://api.github.com/user | jq -r .login)
@@ -37,31 +46,27 @@ jobs:
 
           PAGE=1
 
+          # 4. 分页遍历并同步仓库
           while true; do
-
-            echo ""
-            echo "Fetching page $PAGE ..."
-            echo ""
+            echo -e "\nFetching page $PAGE ...\n"
 
             REPOS=$(curl -s \
               -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/users/$USER/repos?per_page=100&page=$PAGE" \
               | jq -r '.[] | select(.fork == true) | .name')
 
-            # 如果这一页为空
+            # 如果这一页为空，结束循环
             if [ -z "$REPOS" ]; then
               echo "No more repositories."
               break
             fi
 
             for REPO in $REPOS; do
-
-              echo ""
-              echo "====================================="
+              echo -e "\n====================================="
               echo "Syncing repository: $REPO"
               echo "====================================="
 
-              # 每个仓库独立运行
+              # 使用子 Shell 让每个仓库独立运行，互不干扰
               (
                 rm -rf "$REPO"
 
@@ -70,7 +75,7 @@ jobs:
 
                 cd "$REPO" || exit
 
-                # 获取 upstream
+                # 获取 upstream 地址
                 UPSTREAM=$(curl -s \
                   -H "Authorization: token $GH_TOKEN" \
                   "https://api.github.com/repos/$USER/$REPO" \
@@ -82,10 +87,9 @@ jobs:
                 fi
 
                 git remote add upstream "$UPSTREAM"
-
                 git fetch upstream
 
-                # 获取默认分支
+                # 获取默认分支名称 (main, master 等)
                 DEFAULT_BRANCH=$(git remote show origin \
                   | sed -n '/HEAD branch/s/.*: //p')
 
@@ -93,27 +97,22 @@ jobs:
 
                 git checkout "$DEFAULT_BRANCH"
 
-                # 使用 rebase（更干净）
+                # 使用 rebase 同步
                 git pull --rebase upstream "$DEFAULT_BRANCH"
 
-                # 推送
+                # 推送至自己的远程仓库
                 git push origin "$DEFAULT_BRANCH"
 
                 echo "Repository synced successfully."
 
               ) || echo "Failed to sync $REPO, skipped."
 
-              echo ""
-              echo "Finished: $REPO"
-              echo ""
-
+              echo -e "\nFinished: $REPO\n"
             done
 
             PAGE=$((PAGE + 1))
-
           done
 
-          echo ""
-          echo "====================================="
+          echo -e "\n====================================="
           echo "All synchronization tasks completed."
           echo "====================================="
