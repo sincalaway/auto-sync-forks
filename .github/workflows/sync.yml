@@ -65,7 +65,7 @@ jobs:
               (
                 rm -rf "$REPO"
 
-                git clone --depth=1 \
+                git clone --depth=1 --single-branch \
                    "https://x-access-token:$GH_TOKEN@github.com/$USER/$REPO.git"
 
                 cd "$REPO" || exit
