@@ -2,8 +2,9 @@ name: Sync Forks
 
 on:
   schedule:
-    # 中国时间每天凌晨 0 点 (UTC 16:00)
+    # 中国时间每天凌晨 0 点
     - cron: '0 16 * * *'
+
   workflow_dispatch:
 
 permissions:
@@ -16,103 +17,184 @@ jobs:
     steps:
       - name: Sync all fork repositories
         env:
-          # 必须使用具有 'repo' 权限的 Personal Access Token (PAT)
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          
+
         run: |
           set +e
 
-          # 1. 安装依赖并清理空间
+          echo "====================================="
+          echo "Starting fork synchronization..."
+          echo "====================================="
+
+          # 安装依赖
           sudo apt-get update
           sudo apt-get install -y jq git
 
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
+          # 清理磁盘空间
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
           sudo docker system prune -af || true
 
-          # 2. 配置 Git 身份信息 (避免 rebase 时报错)
+          # 禁用 Git LFS 下载（避免大仓库超时）
+          export GIT_LFS_SKIP_SMUDGE=1
+
+          # Git 身份
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 3. 获取当前 Token 绑定的用户名
+          # 获取当前用户
           USER=$(curl -s \
             -H "Authorization: token $GH_TOKEN" \
             https://api.github.com/user | jq -r .login)
 
-          echo "====================================="
           echo "Current User: $USER"
-          echo "====================================="
 
+          SUCCESS_COUNT=0
+          FAIL_COUNT=0
           PAGE=1
 
-          # 4. 分页遍历并同步仓库
           while true; do
-            echo -e "\nFetching page $PAGE ...\n"
 
-            REPOS=$(curl -s \
+            echo ""
+            echo "====================================="
+            echo "Fetching repository page: $PAGE"
+            echo "====================================="
+
+            # 获取所有 fork 仓库（包括 private）
+            RESPONSE=$(curl -s \
               -H "Authorization: token $GH_TOKEN" \
-              "https://api.github.com/users/$USER/repos?per_page=100&page=$PAGE" \
+              "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$PAGE")
+
+            REPOS=$(echo "$RESPONSE" \
               | jq -r '.[] | select(.fork == true) | .name')
 
-            # 如果这一页为空，结束循环
+            # 没有更多仓库
             if [ -z "$REPOS" ]; then
-              echo "No more repositories."
+              echo "No more repositories found."
               break
             fi
 
+            echo ""
+            echo "Fork repositories found:"
+            echo "$REPOS"
+
             for REPO in $REPOS; do
-              echo -e "\n====================================="
+
+              echo ""
+              echo "====================================="
               echo "Syncing repository: $REPO"
               echo "====================================="
 
-              # 使用子 Shell 让每个仓库独立运行，互不干扰
               (
+                # 清理旧目录
                 rm -rf "$REPO"
 
-                git clone --depth=1 --single-branch \
-                   "https://x-access-token:$GH_TOKEN@github.com/$USER/$REPO.git"
+                echo "Cloning repository..."
 
-                cd "$REPO" || exit
+                git clone \
+                  --depth=1 \
+                  --single-branch \
+                  "https://x-access-token:$GH_TOKEN@github.com/$USER/$REPO.git"
 
-                # 获取 upstream 地址
+                if [ $? -ne 0 ]; then
+                  echo "Clone failed."
+                  exit 1
+                fi
+
+                cd "$REPO" || exit 1
+
+                echo "Getting upstream repository..."
+
+                # 获取 upstream
                 UPSTREAM=$(curl -s \
                   -H "Authorization: token $GH_TOKEN" \
                   "https://api.github.com/repos/$USER/$REPO" \
                   | jq -r '.parent.clone_url')
 
-                if [ "$UPSTREAM" = "null" ]; then
-                  echo "No upstream found, skipping..."
-                  exit
+                if [ "$UPSTREAM" = "null" ] || [ -z "$UPSTREAM" ]; then
+                  echo "No upstream repository found."
+                  exit 1
                 fi
 
+                echo "Upstream: $UPSTREAM"
+
                 git remote add upstream "$UPSTREAM"
+
+                echo "Fetching upstream..."
+
                 git fetch upstream
 
-                # 获取默认分支名称 (main, master 等)
+                if [ $? -ne 0 ]; then
+                  echo "Fetch upstream failed."
+                  exit 1
+                fi
+
+                # 获取默认分支
                 DEFAULT_BRANCH=$(git remote show origin \
                   | sed -n '/HEAD branch/s/.*: //p')
+
+                if [ -z "$DEFAULT_BRANCH" ]; then
+                  DEFAULT_BRANCH="main"
+                fi
 
                 echo "Default branch: $DEFAULT_BRANCH"
 
                 git checkout "$DEFAULT_BRANCH"
 
-                # 使用 rebase 同步
+                echo "Pulling upstream changes..."
+
                 git pull --rebase upstream "$DEFAULT_BRANCH"
 
-                # 推送至自己的远程仓库
-                git push origin "$DEFAULT_BRANCH"
+                if [ $? -ne 0 ]; then
+                  echo "Rebase failed. Trying hard reset..."
+
+                  git rebase --abort || true
+
+                  git fetch upstream
+
+                  git reset --hard upstream/"$DEFAULT_BRANCH"
+                fi
+
+                echo "Pushing changes..."
+
+                git push origin "$DEFAULT_BRANCH" --force
+
+                if [ $? -ne 0 ]; then
+                  echo "Push failed."
+                  exit 1
+                fi
 
                 echo "Repository synced successfully."
 
-              ) || echo "Failed to sync $REPO, skipped."
+              )
 
-              echo -e "\nFinished: $REPO\n"
+              # 检查同步结果
+              if [ $? -eq 0 ]; then
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+                echo "SUCCESS: $REPO"
+              else
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+                echo "FAILED: $REPO"
+              fi
+
+              echo ""
+              echo "Finished: $REPO"
+              echo "====================================="
+
+              # 删除仓库释放空间
+              rm -rf "$REPO"
+
             done
 
             PAGE=$((PAGE + 1))
+
           done
 
-          echo -e "\n====================================="
-          echo "All synchronization tasks completed."
+          echo ""
+          echo "====================================="
+          echo "Synchronization completed."
+          echo "====================================="
+          echo "Successful: $SUCCESS_COUNT"
+          echo "Failed: $FAIL_COUNT"
           echo "====================================="
