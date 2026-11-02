@@ -66,7 +66,7 @@ for line in "${FORKS[@]}"; do
     fi
   fi
 
-  fail=$((fail+1)); echo "::warning title=$FULL::$MSG"; add_row "$FULL" "❌ 失败" "$MSG"
+  fail=$((fail+1)); echo "❌ $FULL: $MSG"; echo "::warning::$FULL: $MSG"; add_row "$FULL" "❌ 失败" "$MSG"
 done
 
 {
