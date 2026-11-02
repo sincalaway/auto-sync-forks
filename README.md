@@ -14,6 +14,8 @@
 
 ## 配置
 
+> 完整的分步部署和常见问题见 [DEPLOY.md](DEPLOY.md)。
+
 1. **Secret** `GH_TOKEN`（Settings → Secrets and variables → Actions → Secrets）  
    Personal access token (classic)，勾选 `repo` 和 `workflow`。没有 `workflow` 权限时，上游改了 `.github/workflows` 的仓库会同步失败。
 2. **Variables**（可选，同一页面的 Variables 标签）
