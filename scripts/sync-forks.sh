@@ -38,7 +38,7 @@ for line in "${FORKS[@]}"; do
   if [[ "$DRY_RUN" == "true" ]]; then
     PARENT=$(gh api "repos/$FULL" --jq '"\(.parent.full_name):\(.parent.default_branch)"' 2>/dev/null)
     CMP=$(gh api "repos/$FULL/compare/$BRANCH...${PARENT%%/*}:${PARENT#*:}" --jq '"落后 \(.ahead_by) / 领先 \(.behind_by)"' 2>/dev/null || echo "无法比较")
-    add_row "$FULL" "🔍 检查" "$CMP"; continue
+    echo "🔍 $FULL $CMP"; add_row "$FULL" "🔍 检查" "$CMP"; continue
   fi
 
   RESP=$(gh api -X POST "repos/$FULL/merge-upstream" -f branch="$BRANCH" 2>&1)
