@@ -2,118 +2,39 @@ name: Sync Forks
 
 on:
   schedule:
-    - cron: '0 */6 * * *'      # 改成每6小时一次，更及时
+    - cron: '17 */6 * * *'   # 每 6 小时（避开整点高峰，整点任务常被延迟或丢弃）
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只检查不写入'
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
+  actions: write   # 用于保活，防止 60 天无提交后定时任务被 GitHub 自动停用
+
+concurrency:
+  group: sync-forks
+  cancel-in-progress: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Sync all fork repositories
+      - uses: actions/checkout@v4
+
+      - name: Sync all forks
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          set +e
-          echo "====================================="
-          echo "Starting fork synchronization..."
-          echo "====================================="
+          EXCLUDE_REPOS: ${{ vars.EXCLUDE_REPOS }}
+          FORCE_REPOS: ${{ vars.FORCE_REPOS }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: bash scripts/sync-forks.sh
 
-          sudo apt-get update && sudo apt-get install -y jq git
-
-          # 清理空间
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost || true
-          sudo docker system prune -af || true
-
-          export GIT_LFS_SKIP_SMUDGE=1
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          USER=$(curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/user | jq -r .login)
-          echo "Current User: $USER"
-
-          SUCCESS_COUNT=0
-          FAIL_COUNT=0
-          PAGE=1
-
-          while true; do
-            RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
-              "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$PAGE")
-
-            REPOS=$(echo "$RESPONSE" | jq -r '.[] | select(.fork == true) | .name')
-            if [ -z "$REPOS" ]; then break; fi
-
-            echo "Fork repositories found on page $PAGE: $(echo $REPOS | wc -w)"
-
-            for REPO in $REPOS; do
-              echo "====================================="
-              echo "Syncing repository: $REPO"
-              echo "====================================="
-
-              (
-                rm -rf "$REPO"
-                echo "Cloning repository..."
-                
-                # 使用较深的克隆，解决浅克隆问题
-                git clone --depth=10 --single-branch "https://x-access-token:$GH_TOKEN@github.com/$USER/$REPO.git" "$REPO"
-                cd "$REPO" || exit 1
-
-                # 获取 upstream
-                UPSTREAM=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                  "https://api.github.com/repos/$USER/$REPO" | jq -r '.parent.clone_url')
-
-                if [ "$UPSTREAM" = "null" ] || [ -z "$UPSTREAM" ]; then
-                  echo "No upstream found, skipping."
-                  exit 0
-                fi
-
-                echo "Upstream: $UPSTREAM"
-                git remote add upstream "$UPSTREAM" 2>/dev/null || true
-                git fetch upstream --tags --prune
-
-                # 改进默认分支获取方式（更可靠）
-                DEFAULT_BRANCH=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                  "https://api.github.com/repos/$USER/$REPO" | jq -r '.default_branch')
-
-                echo "Default branch: $DEFAULT_BRANCH"
-
-                git checkout "$DEFAULT_BRANCH" || git checkout -b "$DEFAULT_BRANCH"
-
-                echo "Merging upstream changes..."
-                
-                # 优先尝试 merge，失败则 reset（更稳健）
-                if git merge "upstream/$DEFAULT_BRANCH" --allow-unrelated-histories -m "Merge upstream changes"; then
-                  echo "Merge successful."
-                else
-                  echo "Merge failed, using hard reset..."
-                  git fetch upstream
-                  git reset --hard "upstream/$DEFAULT_BRANCH"
-                fi
-
-                echo "Pushing changes..."
-                git push origin "$DEFAULT_BRANCH" --force-with-lease
-
-                echo "Repository synced successfully."
-              )
-
-              if [ $? -eq 0 ]; then
-                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-                echo "✅ SUCCESS: $REPO"
-              else
-                FAIL_COUNT=$((FAIL_COUNT + 1))
-                echo "❌ FAILED: $REPO"
-              fi
-
-              rm -rf "$REPO"
-              echo "Finished: $REPO"
-            done
-
-            PAGE=$((PAGE + 1))
-          done
-
-          echo "====================================="
-          echo "Synchronization completed!"
-          echo "Successful: $SUCCESS_COUNT | Failed: $FAIL_COUNT"
-          echo "====================================="
+      - name: Keepalive
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sync.yml/enable" || true

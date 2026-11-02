@@ -1,129 +1,32 @@
-# 自动同步所有 Fork 仓库
+# auto-sync-forks
 
-## 特点
+用 GitHub Actions 每 6 小时把你账号（及所在组织）下的所有 Fork 同步到上游最新。免费、无需服务器。
 
-✓ 免费  
-✓ 不用电脑  
-✓ 不用服务器  
-✓ 不用 VPS  
-✓ 不用 Docker  
-✓ 永久在线  
+## 工作方式
 
----
+调用 GitHub 官方 [merge-upstream](https://docs.github.com/rest/branches/branches#sync-a-fork-branch-with-the-upstream-repository) 接口，效果等同在网页上点 **Sync fork**：
 
-# 核心功能
+- 由 GitHub 服务端完成，**不克隆仓库**，几十个 Fork 一分钟内跑完，大仓库（llama.cpp、ChinaTextbook 等）也不会超时或爆磁盘
+- 能快进就快进，否则自动合并；**有冲突时不动你的分支**，只在结果里标出来
+- 自动分页、自动跳过已归档仓库、自动识别默认分支
+- 有失败时任务标红，GitHub 会发邮件提醒；每次运行的结果表格在 Actions 的 Summary 页
+- 自带保活：GitHub 会在仓库 60 天无提交后停用定时任务，工作流每次运行都会自动重新启用自己
 
-✓ 自动同步全部 Fork  
-✓ 自动扫描 GitHub 全部 Fork 仓库  
-✓ 自动分页（支持超过 100 个仓库）  
-✓ 自动同步 Public / Private Fork  
-✓ 自动同步 Organization Fork  
-✓ 自动获取 Upstream  
-✓ 自动 Rebase 同步  
-✓ 自动 Push 更新  
-✓ 自动检测默认分支（main / master 等）  
-✓ 自动日志输出  
-✓ 自动统计成功 / 失败数量  
+## 配置
 
----
+1. **Secret** `GH_TOKEN`（Settings → Secrets and variables → Actions → Secrets）  
+   Personal access token (classic)，勾选 `repo` 和 `workflow`。没有 `workflow` 权限时，上游改了 `.github/workflows` 的仓库会同步失败。
+2. **Variables**（可选，同一页面的 Variables 标签）
+   | 名称 | 作用 | 示例 |
+   |---|---|---|
+   | `EXCLUDE_REPOS` | 不同步的仓库 | `ChinaTextbook,orca` |
+   | `FORCE_REPOS` | 冲突时强制对齐上游（**会丢弃你在该分支上的自有提交**），`*` 表示全部 | `yt-dlp,v2rayN` |
 
-# 企业级容错
+## 运行
 
-✓ 单仓库失败不影响其他仓库  
-✓ 自动跳过无 Upstream 仓库  
-✓ 自动处理 Rebase 冲突  
-✓ Rebase 失败自动 Hard Reset 修复  
-✓ 自动检测 Clone 失败  
-✓ 自动检测 Fetch 失败  
-✓ 自动检测 Push 失败  
-✓ 防止 GitHub Actions 假成功  
+- 自动：每 6 小时一次（`17 */6 * * *`，UTC）
+- 手动：Actions → Sync Forks → Run workflow，可勾选「只检查不写入」查看每个 Fork 落后/领先上游多少提交
 
----
+## 冲突怎么办
 
-# 大仓库优化
-
-✓ 自动禁用 Git LFS 下载  
-✓ 避免 GGUF / 模型文件超时  
-✓ 自动清理磁盘空间  
-✓ 自动删除临时仓库目录  
-✓ 减少 GitHub Actions 磁盘占用  
-✓ 支持大型仓库（如 llama.cpp / Hermes Agent）  
-
----
-
-# GitHub Actions 优势
-
-✓ GitHub 官方 Runner  
-✓ 云端自动运行  
-✓ 无需本地常驻  
-✓ 定时自动执行  
-✓ 支持手动一键同步  
-✓ 完全自动化  
-
----
-
-# 适用场景
-
-- 自动同步所有 Fork
-- 同步开源项目
-- 自动追踪上游更新
-- 镜像维护
-- AI 项目同步
-- 大型仓库自动更新
-- 多仓库统一管理
-
----
-
-# 支持仓库类型
-
-✓ 普通 Git 仓库  
-✓ 大型仓库  
-✓ AI 仓库  
-✓ 含 Git LFS 仓库  
-✓ Public Fork  
-✓ Private Fork  
-✓ Organization Fork  
-
----
-
-# 运行方式
-
-- GitHub Actions
-- 每天自动运行
-- 可手动运行
-- 全自动同步
-- 无需人工维护
-
----
-
-# 技术特性
-
-✓ GitHub API 自动扫描  
-✓ 分页遍历全部仓库  
-✓ Bash 自动化同步  
-✓ Git Rebase 同步策略  
-✓ Force Push 自动更新  
-✓ GitHub Token 鉴权  
-✓ Shell 容错机制  
-
----
-
-# 同步流程
-
-```text
-扫描全部 Fork
-        ↓
-获取 Upstream
-        ↓
-Clone 仓库
-        ↓
-Fetch Upstream
-        ↓
-Rebase 同步
-        ↓
-Push 更新
-        ↓
-输出日志
-        ↓
-统计结果
-```
+冲突说明你在 Fork 里改过东西。到该仓库页面点 Sync fork → 按提示处理；如果这个 Fork 只是镜像、不需要保留自己的改动，把它加进 `FORCE_REPOS`。
