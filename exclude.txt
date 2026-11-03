@@ -1,2 +1,4 @@
 # 不自动同步的仓库，每行一个（仓库名或 owner/仓库名）
-katabump-renew
+# 上游已删除
+free-ai
+www
