@@ -2,3 +2,5 @@
 # 上游已删除
 free-ai
 www
+# 被 GitHub 锁定
+claw-code

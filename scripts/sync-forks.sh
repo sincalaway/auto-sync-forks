@@ -61,9 +61,24 @@ for line in "${FORKS[@]}"; do
   MSG=$(jq -r '.message? // empty' <<<"$RESP" 2>/dev/null | head -1)
   [[ -z "$MSG" ]] && MSG=$(echo "$RESP" | tail -1)
 
-  # 冲突或分支名不一致：仅对 FORCE_REPOS 中的仓库强制对齐上游
+  # 上游默认分支改名时，尝试用上游同名分支快进（仅当 Fork 没有自有提交，安全）
+  read -r UP UPBR < <(gh api "repos/$FULL" --jq '"\(.parent.full_name) \(.parent.default_branch)"')
+  if [[ "$UPBR" != "$BRANCH" ]]; then
+    STATUS=$(gh api "repos/$FULL/compare/$BRANCH...${UP%%/*}:$BRANCH" --jq .status 2>/dev/null)
+    if [[ "$STATUS" == "behind" || "$STATUS" == "identical" ]]; then
+      if [[ "$STATUS" == "identical" ]]; then
+        same=$((same+1)); echo "= $FULL 已是最新（上游同名分支 $BRANCH）"; continue
+      fi
+      SHA=$(gh api "repos/$UP/commits/$BRANCH" --jq .sha 2>/dev/null)
+      if [[ -n "$SHA" ]] && gh api -X PATCH "repos/$FULL/git/refs/heads/$BRANCH" -f sha="$SHA" >/dev/null 2>&1; then
+        ok=$((ok+1)); echo "✅ $FULL (fast-forward，上游同名分支 $BRANCH)"; add_row "$FULL" "✅ 已更新" "跟随上游 $BRANCH 分支"
+        continue
+      fi
+    fi
+  fi
+
+  # 冲突：仅对 FORCE_REPOS 中的仓库强制对齐上游
   if in_list "$NAME" "$FORCE_REPOS" || in_list "$FULL" "$FORCE_REPOS"; then
-    read -r UP UPBR < <(gh api "repos/$FULL" --jq '"\(.parent.full_name) \(.parent.default_branch)"')
     SHA=$(gh api "repos/$UP/commits/$UPBR" --jq .sha 2>/dev/null)
     if [[ -n "$SHA" ]] && gh api -X PATCH "repos/$FULL/git/refs/heads/$BRANCH" -f sha="$SHA" -F force=true >/dev/null 2>&1; then
       forced=$((forced+1)); echo "⚠️ $FULL 已强制对齐 $UP@$UPBR"; add_row "$FULL" "⚠️ 强制对齐" "$MSG"
