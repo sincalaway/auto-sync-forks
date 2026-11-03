@@ -84,6 +84,7 @@ Workflow permissions 保持默认即可，工作流已声明所需权限。
 | Variable | `EXCLUDE_REPOS` | 否 | 永不同步的仓库 | `ChinaTextbook,TapCanvas` |
 | Variable | `FORCE_REPOS` | 否 | 冲突时把分支强制重置到上游最新，`*` 表示全部 | `gate,bungeecord` |
 
+- 也可以在仓库根目录的 `exclude.txt` 里写要排除的仓库，每行一个，`#` 开头为注释，效果同 `EXCLUDE_REPOS`
 - 多个仓库用逗号或空格分隔；可写 `仓库名` 或 `owner/仓库名`（区分组织下同名仓库时用后者）
 - ⚠️ `FORCE_REPOS` **会丢弃你在该分支上的自有提交**，只用于纯镜像、不需要保留改动的仓库
 

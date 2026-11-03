@@ -9,7 +9,12 @@
 #   DRY_RUN       选填。为 true 时只检查不写入
 set -uo pipefail
 
+# 仓库根目录 exclude.txt 中的仓库也会被排除（每行一个，# 开头为注释）
+FILE_EXCLUDE=""
+[[ -f exclude.txt ]] && FILE_EXCLUDE=$(sed 's/#.*//' exclude.txt | tr -s ' \n\r\t' ' ')
+EXCLUDE_REPOS=" ${EXCLUDE_REPOS:-} ${FILE_EXCLUDE} "
 EXCLUDE_REPOS=" ${EXCLUDE_REPOS//,/ } "
+FORCE_REPOS=" ${FORCE_REPOS:-} "
 FORCE_REPOS=" ${FORCE_REPOS//,/ } "
 DRY_RUN="${DRY_RUN:-false}"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
