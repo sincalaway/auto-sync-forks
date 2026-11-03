@@ -2,6 +2,14 @@
 
 用 GitHub Actions 每 6 小时把你账号（及所在组织）下的所有 Fork 同步到上游最新。免费、无需服务器，新 Fork 的仓库自动纳入。
 
+<p align="center">
+  <a href="https://github.com/sincalaway/auto-sync-forks/generate">
+    <img src="https://img.shields.io/badge/%F0%9F%9A%80%20%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2-Use%20this%20template-2ea44f?style=for-the-badge" alt="一键部署：Use this template" height="44">
+  </a>
+</p>
+
+<p align="center">点上方绿色按钮，即可复制一份到你自己的账号，再按 <a href="#快速部署5-分钟">快速部署</a> 完成配置</p>
+
 - [工作方式](#工作方式)
 - [快速部署（5 分钟）](#快速部署5-分钟)
 - [配置项](#配置项)
@@ -27,7 +35,7 @@
 
 ### 1. 获取本仓库
 
-在本仓库页面点 **Use this template** → **Create a new repository**。
+👉 **[点这里一键创建：Use this template](https://github.com/sincalaway/auto-sync-forks/generate)**（或在仓库页面右上角点绿色的 **Use this template** → **Create a new repository**），填写仓库名后点 **Create repository**。
 
 > 不要用 Fork：Fork 出来的副本自己也会被当作 Fork 同步，且 Fork 仓库默认禁用定时任务。
 
